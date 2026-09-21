@@ -1,0 +1,3 @@
+# Test/dev tooling. Kept out of requirements.txt so the Render image stays small.
+-r requirements.txt
+pytest>=8,<9

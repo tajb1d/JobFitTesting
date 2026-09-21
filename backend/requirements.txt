@@ -1,0 +1,28 @@
+# Runtime dependencies. Pinned to major versions (0.x packages pinned to minor).
+
+# Web
+fastapi>=0.115,<0.200
+uvicorn[standard]>=0.30,<1
+python-multipart>=0.0.9,<0.1
+pydantic>=2.7,<3
+pydantic-settings>=2.3,<3
+
+# Database
+sqlalchemy>=2.0,<3
+alembic>=1.13,<2
+psycopg[binary]>=3.2,<4
+pgvector>=0.3,<0.5
+
+# Auth
+pyjwt[crypto]>=2.8,<3
+
+# HTTP client (Supabase, Voyage)
+httpx>=0.27,<1
+
+# Resume pipeline (used from Session 2 on)
+pymupdf>=1.24,<2
+spacy>=3.7,<4
+scikit-learn>=1.5,<2
+
+# LLM feedback
+anthropic>=0.40,<1
