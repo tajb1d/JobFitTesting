@@ -12,3 +12,21 @@ html {
   background-color: var(--color-slate-50);
   color: var(--color-slate-900);
 }
+
+/* Tailwind 4 no longer sets cursor: pointer on buttons (Tailwind 3 did), so clickable
+   controls look inert. Restore it for real controls only. */
+@layer base {
+  button:not(:disabled),
+  select:not(:disabled),
+  summary,
+  [role='button']:not([aria-disabled='true']),
+  input[type='checkbox']:not(:disabled),
+  input[type='file'] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  select:disabled {
+    cursor: not-allowed;
+  }
+}

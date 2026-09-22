@@ -6,9 +6,13 @@ import AnalysisPage from './pages/Analysis'
 import Analyze from './pages/Analyze'
 import Dashboard from './pages/Dashboard'
 import History from './pages/History'
+import JobDetail from './pages/JobDetail'
+import Jobs from './pages/Jobs'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
+import Settings from './pages/Settings'
 import Signup from './pages/Signup'
+import Tracker from './pages/Tracker'
 import { RequireAuth, RequireResume } from './routes/ProtectedRoute'
 
 export default function App() {
@@ -22,10 +26,15 @@ export default function App() {
 
             <Route element={<RequireAuth />}>
               <Route path="/onboarding" element={<Onboarding />} />
-              <Route element={<RequireResume />}>
-                <Route element={<AppLayout />}>
+              <Route element={<AppLayout />}>
+                {/* Reachable without a resume, so an account can always be deleted. */}
+                <Route path="/settings" element={<Settings />} />
+                <Route element={<RequireResume />}>
                   <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/jobs" element={<Jobs />} />
+                  <Route path="/jobs/:id" element={<JobDetail />} />
                   <Route path="/analyze" element={<Analyze />} />
+                  <Route path="/tracker" element={<Tracker />} />
                   <Route path="/analyses/:id" element={<AnalysisPage />} />
                   <Route path="/history" element={<History />} />
                 </Route>

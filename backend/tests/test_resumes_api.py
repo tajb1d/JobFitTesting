@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import func, select, update
 
 from app.api.deps import get_current_user
-from app.config import EMBEDDING_DIM
+from app.config import EMBEDDING_DIM, get_settings
 from app.main import app
 from app.models import Resume, ResumeBullet
 from app.services.resumes import MAX_PDF_BYTES, clean_filename, resume_embedding_text
@@ -136,6 +136,54 @@ def test_other_users_cannot_see_or_delete_a_resume(db_client, test_user_id, pdf_
 def test_unknown_id_is_not_found(db_client):
     assert db_client.get(f"{RESUMES}/{uuid.uuid4()}").status_code == 404
     assert db_client.delete(f"{RESUMES}/{uuid.uuid4()}").status_code == 404
+
+
+@pytestmark_db
+def test_upload_is_capped_per_user(db_client, pdf_bytes, monkeypatch, fake_embedder):
+    monkeypatch.setattr(get_settings(), "max_resumes_per_user", 2)
+    assert _upload(db_client, pdf_bytes).status_code == 201
+    assert _upload(db_client, pdf_bytes).status_code == 201
+    calls = len(fake_embedder.calls)
+
+    r = _upload(db_client, pdf_bytes)
+    assert r.status_code == 409 and "limit of 2 resumes" in r.json()["detail"]
+    assert len(fake_embedder.calls) == calls  # rejected before paying for embeddings
+    assert len(db_client.get(RESUMES).json()) == 2
+
+    # Deleting one frees a slot.
+    assert db_client.delete(f"{RESUMES}/{db_client.get(RESUMES).json()[0]['id']}").status_code == 204
+    assert _upload(db_client, pdf_bytes).status_code == 201
+
+
+@pytestmark_db
+def test_patch_switches_the_active_resume(db_client, db_session, pdf_bytes, test_user_id):
+    first = _upload(db_client, pdf_bytes).json()
+    _backdate(db_session, first["id"], minutes=5)
+    second = _upload(db_client, pdf_bytes).json()  # uploading makes the newest active
+    assert [r["is_active"] for r in db_client.get(RESUMES).json()] == [True, False]
+
+    r = db_client.patch(f"{RESUMES}/{first['id']}", json={"is_active": True})
+    assert r.status_code == 200 and r.json()["is_active"] is True
+    assert {x["id"]: x["is_active"] for x in db_client.get(RESUMES).json()} == {
+        first["id"]: True,
+        second["id"]: False,
+    }
+
+    # Re-activating the one that's already active is a no-op, not an error.
+    assert db_client.patch(f"{RESUMES}/{first['id']}", json={"is_active": True}).status_code == 200
+    assert sum(x["is_active"] for x in db_client.get(RESUMES).json()) == 1
+
+
+@pytestmark_db
+def test_patch_rejects_deactivation_and_other_users_resumes(db_client, pdf_bytes, test_user_id):
+    resume = _upload(db_client, pdf_bytes).json()
+    assert db_client.patch(f"{RESUMES}/{resume['id']}", json={"is_active": False}).status_code == 422
+    assert db_client.patch(f"{RESUMES}/{resume['id']}", json={}).status_code == 422
+    assert db_client.patch(f"{RESUMES}/{uuid.uuid4()}", json={"is_active": True}).status_code == 404
+
+    app.dependency_overrides[get_current_user] = lambda: uuid.uuid4()
+    assert db_client.patch(f"{RESUMES}/{resume['id']}", json={"is_active": True}).status_code == 404
+    app.dependency_overrides[get_current_user] = lambda: test_user_id
 
 
 @pytestmark_db

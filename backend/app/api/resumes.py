@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.schemas.resume import ResumeOut, ResumeSummary
+from app.schemas.resume import ResumeActivate, ResumeOut, ResumeSummary
 from app.services import resumes
 from app.services.embeddings import EmbeddingError, EmbeddingProvider, get_embedder
 from app.services.pdf_analyzer import PdfError
@@ -61,6 +61,21 @@ def get_resume(
     if resume is None:
         raise _not_found()
     return ResumeOut.from_model(resume, resumes.get_bullets(db, resume))
+
+
+@router.patch("/{resume_id}", response_model=ResumeSummary)
+def activate_resume(
+    resume_id: uuid.UUID,
+    body: ResumeActivate,  # noqa: ARG001 - only {"is_active": true} is accepted
+    user_id: uuid.UUID = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResumeSummary:
+    """Switch which resume is active. Deactivating isn't offered: the feed and new analyses
+    need one active resume, and deleting the active one already promotes the newest."""
+    resume = resumes.set_active(db, user_id, resume_id)
+    if resume is None:
+        raise _not_found()
+    return ResumeSummary.model_validate(resume)
 
 
 @router.delete("/{resume_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -4,9 +4,10 @@ import re
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, load_only
 
+from app.config import get_settings
 from app.models import Profile, Resume, ResumeBullet
 from app.services.embeddings import EmbeddingProvider
 from app.services.nlp_analyzer import SkillMatch, extract_skills
@@ -84,6 +85,13 @@ def create_resume(
     """Analyze, embed, and store a resume as the user's active one.
     Nothing is stored if analysis or embedding fails."""
     validate_upload(data, content_type)
+    limit = get_settings().max_resumes_per_user
+    stored = db.scalar(select(func.count()).select_from(Resume).where(Resume.user_id == user_id))
+    if stored >= limit:
+        raise UploadError(
+            409,
+            f"You've reached the limit of {limit} resumes. Delete one in Settings to upload another.",
+        )
     analysis = analyze_resume(data)
     bullets = analysis.structure.bullets
 
@@ -152,6 +160,23 @@ def get_resume(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID) -> Resume 
 def get_bullets(db: Session, resume: Resume) -> list[ResumeBullet]:
     stmt = select(ResumeBullet).where(ResumeBullet.resume_id == resume.id).order_by(ResumeBullet.id)
     return list(db.scalars(stmt))
+
+
+def set_active(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID) -> Resume | None:
+    """Make one of the user's resumes the active one (the one the feed and new analyses use).
+    Clears the flag on the others, as create_resume does on upload. None if not found."""
+    resume = get_resume(db, user_id, resume_id)
+    if resume is None:
+        return None
+    db.execute(
+        update(Resume)
+        .where(Resume.user_id == user_id, Resume.id != resume_id, Resume.is_active.is_(True))
+        .values(is_active=False)
+    )
+    resume.is_active = True
+    db.commit()
+    db.refresh(resume)
+    return resume
 
 
 def delete_resume(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID) -> bool:

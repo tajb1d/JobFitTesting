@@ -58,6 +58,9 @@ class Settings(BaseSettings):
 
     # Per-user limit on POST /analyses (each one calls the LLM).
     analyses_per_hour: int = 20
+    # Per-user resume cap. Each resume costs two Voyage calls and ~50 KB of rows, so this
+    # only exists to stop one account filling the free-tier database.
+    max_resumes_per_user: int = 10
 
     # Recommendations (plan §9): pgvector candidates to rerank, and §8 eligibility rules.
     recommendation_candidates: int = 100

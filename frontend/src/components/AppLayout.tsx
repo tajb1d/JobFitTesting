@@ -3,8 +3,11 @@ import { useAuth } from '../auth/context'
 
 const LINKS = [
   { to: '/dashboard', label: 'Dashboard' },
+  { to: '/jobs', label: 'Jobs' },
   { to: '/analyze', label: 'Analyze' },
+  { to: '/tracker', label: 'Tracker' },
   { to: '/history', label: 'History' },
+  { to: '/settings', label: 'Settings' },
 ]
 
 export default function AppLayout() {
@@ -18,7 +21,7 @@ export default function AppLayout() {
           <NavLink to="/dashboard" className="text-lg font-bold text-accent-700">
             JobFit
           </NavLink>
-          <nav className="flex gap-4 text-sm">
+          <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
             {LINKS.map((link) => (
               <NavLink
                 key={link.to}

@@ -39,6 +39,12 @@ class BulletOut(BaseModel):
     text: str
 
 
+class ResumeActivate(BaseModel):
+    """Body for PATCH /resumes/{id}. Only activation: a user always has an active resume."""
+
+    is_active: Literal[True]
+
+
 class ResumeSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

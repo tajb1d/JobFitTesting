@@ -6,9 +6,14 @@ import type {
   Analysis,
   AnalysisCreate,
   AnalysisSummary,
+  Application,
+  ApplicationStatus,
+  JobDetail,
   Me,
   Profile,
   ProfileUpdate,
+  RecommendationFilters,
+  Recommendations,
   Resume,
   ResumeSummary,
 } from '../types/api'
@@ -101,6 +106,10 @@ export const api = {
     request<Profile>('/api/v1/profile', { ...o, method: 'PUT', body }),
 
   listResumes: (o?: Opts) => request<ResumeSummary[]>('/api/v1/resumes', o),
+  setActiveResume: (id: string, o?: Opts) =>
+    request<ResumeSummary>(`/api/v1/resumes/${id}`, { ...o, method: 'PATCH', body: { is_active: true } }),
+  deleteResume: (id: string, o?: Opts) =>
+    request<void>(`/api/v1/resumes/${id}`, { ...o, method: 'DELETE' }),
   getResume: (id: string, o?: Opts) => request<Resume>(`/api/v1/resumes/${id}`, o),
   uploadResume: (file: File, o?: Opts) => {
     const form = new FormData()
@@ -112,4 +121,28 @@ export const api = {
     request<Analysis>('/api/v1/analyses', { ...o, method: 'POST', body }),
   listAnalyses: (o?: Opts) => request<AnalysisSummary[]>('/api/v1/analyses', o),
   getAnalysis: (id: string, o?: Opts) => request<Analysis>(`/api/v1/analyses/${id}`, o),
+
+  getRecommendations: (filters: RecommendationFilters, o?: Opts) => {
+    const query = new URLSearchParams()
+    if (filters.remote !== undefined) query.set('remote', String(filters.remote))
+    if (filters.location) query.set('location', filters.location)
+    if (filters.level) query.set('level', filters.level)
+    if (filters.show_stretch) query.set('show_stretch', 'true')
+    if (filters.limit) query.set('limit', String(filters.limit))
+    return request<Recommendations>(`/api/v1/recommendations?${query}`, o)
+  },
+  getJob: (id: string, o?: Opts) => request<JobDetail>(`/api/v1/jobs/${id}`, o),
+
+  listApplications: (o?: Opts) => request<Application[]>('/api/v1/applications', o),
+  createApplication: (jobId: string, o?: Opts) =>
+    request<Application>('/api/v1/applications', { ...o, method: 'POST', body: { job_id: jobId } }),
+  updateApplication: (
+    id: string,
+    changes: { status?: ApplicationStatus; notes?: string | null },
+    o?: Opts,
+  ) => request<Application>(`/api/v1/applications/${id}`, { ...o, method: 'PATCH', body: changes }),
+  deleteApplication: (id: string, o?: Opts) =>
+    request<void>(`/api/v1/applications/${id}`, { ...o, method: 'DELETE' }),
+
+  deleteAccount: (o?: Opts) => request<void>('/api/v1/account', { ...o, method: 'DELETE' }),
 }

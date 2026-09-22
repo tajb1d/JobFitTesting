@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth, useResumes } from '../auth/context'
+import ResumeUpload from '../components/ResumeUpload'
 import { Button, Card, ErrorNote, Field, Loading, PageTitle } from '../components/ui'
 import { api } from '../lib/api'
 import { useAction } from '../lib/useApi'
 import type { ExperienceLevel, Resume } from '../types/api'
 
-const MAX_PDF_BYTES = 5 * 1024 * 1024 // matches the backend limit
 const LEVELS: { value: ExperienceLevel; label: string }[] = [
   { value: 'intern', label: 'Internship' },
   { value: 'entry', label: 'Entry level / new grad' },
@@ -33,48 +33,18 @@ export default function Onboarding() {
 }
 
 function UploadStep({ onUploaded }: { onUploaded: (resume: Resume) => void }) {
-  const [file, setFile] = useState<File | null>(null)
-  const [localError, setLocalError] = useState<string | null>(null)
-  const upload = useAction((o, f: File) => api.uploadResume(f, o))
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!file) return setLocalError('Choose a PDF first.')
-    if (file.type !== 'application/pdf') return setLocalError('Only PDF files are accepted.')
-    if (file.size > MAX_PDF_BYTES) return setLocalError('The PDF must be 5 MB or smaller.')
-    setLocalError(null)
-    const resume = await upload.run(file)
-    if (resume) onUploaded(resume)
-  }
-
   return (
     <>
       <PageTitle sub="We read the text to score it and match you to jobs. We never store the file itself.">
         Upload your resume
       </PageTitle>
       <Card>
-        <form onSubmit={onSubmit} className="space-y-4" noValidate>
-          {(localError || upload.error) && <ErrorNote>{localError ?? upload.error?.message}</ErrorNote>}
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-slate-700">Resume (PDF, up to 5 MB)</span>
-            <input
-              type="file"
-              accept="application/pdf"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-accent-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-accent-700 hover:file:bg-accent-100"
-            />
-          </label>
-          <Button type="submit" loading={upload.loading} waking={upload.waking}>
-            Upload and continue
-          </Button>
-          <p className="text-xs text-slate-500">
-            A text-based PDF works best. Scanned or image-only resumes can't be read.
-          </p>
-        </form>
+        <ResumeUpload buttonText="Upload and continue" onUploaded={onUploaded} />
       </Card>
     </>
   )
 }
+
 
 function DetailsStep({ resume, onDone }: { resume: Resume | null; onDone: () => void }) {
   const navigate = useNavigate()
