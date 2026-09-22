@@ -3,6 +3,7 @@ experience the description requires. Pure functions, used at analysis time and i
 
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 Level = str  # "intern" | "entry" | "mid" | "senior" | "staff"
 LEVELS: tuple[Level, ...] = ("intern", "entry", "mid", "senior", "staff")
@@ -128,3 +129,50 @@ def extract_min_years(sections: Iterable[tuple[str, str]]) -> int | None:
     elsewhere = [y for key, text in sections if key != "nice"
                  for y in years_mentions(text, require_experience_context=True)]
     return min(elsewhere) if elsewhere else None
+
+
+# ---------------------------------------------------------------- feed adjustment
+
+# The profile stores a level, not years, so the §8 years rule uses the top of each level's
+# typical range. None = no ceiling (staff+).
+LEVEL_MAX_YEARS: dict[Level, int | None] = {
+    "intern": 0, "entry": 2, "mid": 5, "senior": 9, "staff": None,
+}
+
+
+@dataclass(frozen=True)
+class Eligibility:
+    levels_above: int | None  # job level minus user level; None if either is unknown
+    stretch: bool             # above the user's level or experience
+    hidden: bool              # dropped from the default feed
+    multiplier: float         # applied to the reranked score
+
+
+def eligibility_adjustment(
+    job_level: Level | None,
+    job_min_years: int | None,
+    user_level: Level | None,
+    *,
+    show_stretch: bool,
+    penalty: float,
+    hide_levels_above: int,
+    hide_years_margin: int,
+) -> Eligibility:
+    """Plan §8: hide jobs hide_levels_above+ levels above the user, or asking for
+    user max years + hide_years_margin or more; otherwise multiply by penalty per level above.
+    show_stretch disables hiding; the penalty still applies. An unknown level on either side
+    skips the level rules (and, for the user, the years rule too)."""
+    levels_above = None
+    if job_level in LEVELS and user_level in LEVELS:
+        levels_above = LEVELS.index(job_level) - LEVELS.index(user_level)
+    max_years = LEVEL_MAX_YEARS.get(user_level) if user_level in LEVELS else None
+    too_senior = levels_above is not None and levels_above >= hide_levels_above
+    too_experienced = (max_years is not None and job_min_years is not None
+                       and job_min_years >= max_years + hide_years_margin)
+    above = max(levels_above or 0, 0)
+    return Eligibility(
+        levels_above=levels_above,
+        stretch=too_senior or too_experienced or above > 0,
+        hidden=(too_senior or too_experienced) and not show_stretch,
+        multiplier=penalty ** above,
+    )

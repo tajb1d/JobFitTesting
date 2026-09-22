@@ -70,3 +70,47 @@ def test_roles_are_trimmed(db_client):
 )
 def test_invalid_bodies_are_422(db_client, body):
     assert db_client.put(PROFILE, json=body).status_code == 422
+
+
+# ---------------------------------------------------------------- resume re-embed on role change
+
+
+def _upload(client, fixture_pdfs) -> str:
+    r = client.post("/api/v1/resumes",
+                    files={"file": ("r.pdf", fixture_pdfs[0].read_bytes(), "application/pdf")})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def test_changing_roles_reembeds_the_active_resume(db_client, db_session, fixture_pdfs, fake_embedder):
+    from app.models import Resume
+
+    resume_id = _upload(db_client, fixture_pdfs)
+    before = list(db_session.get(Resume, uuid.UUID(resume_id)).embedding)
+    calls = len(fake_embedder.calls)
+
+    assert db_client.put(PROFILE, json=FULL).status_code == 200
+    assert len(fake_embedder.calls) == calls + 1
+    input_type, texts = fake_embedder.calls[-1]
+    assert input_type == "query"
+    assert texts[0].startswith("Target roles: Backend Engineer, Data Engineer\n\n")
+
+    db_session.expire_all()
+    stored = db_session.get(Resume, uuid.UUID(resume_id))
+    assert stored.embedding is not None and len(stored.embedding) == len(before)
+
+    # Same roles again (other fields changed): no new embedding call.
+    assert db_client.put(PROFILE, json=FULL | {"location": "Austin, TX"}).status_code == 200
+    assert len(fake_embedder.calls) == calls + 1
+
+
+def test_reembed_failure_still_saves_the_profile(db_client, fixture_pdfs, fake_embedder):
+    _upload(db_client, fixture_pdfs)
+    fake_embedder.fail = True
+    r = db_client.put(PROFILE, json=FULL)
+    assert r.status_code == 200 and r.json()["target_roles"] == FULL["target_roles"]
+
+
+def test_role_change_without_a_resume_makes_no_call(db_client, fake_embedder):
+    assert db_client.put(PROFILE, json=FULL).status_code == 200
+    assert fake_embedder.calls == []

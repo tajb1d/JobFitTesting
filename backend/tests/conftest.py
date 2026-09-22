@@ -202,3 +202,60 @@ def fixture_pdfs() -> list[Path]:
     if not pdfs:
         pytest.skip("No resume PDFs in tests/fixtures/")
     return pdfs
+
+
+# ---------------------------------------------------------------- corpus jobs (real Supabase)
+
+
+def unit_vector(axis: int) -> list[float]:
+    """A distinct direction per axis, so tests control cosine similarity exactly."""
+    v = [0.0] * EMBEDDING_DIM
+    v[axis % EMBEDDING_DIM] = 1.0
+    return v
+
+
+@pytest.fixture
+def make_job(db_session: Session):
+    """Create open corpus jobs inside the rolled-back transaction. The real corpus is closed
+    first (seen now, so nothing prunes it), so only these jobs are recommendable."""
+    from app.models import Company, Job, JobRequirement
+
+    db_session.execute(text("UPDATE jobs SET status = 'closed', last_seen = now()"))
+    company = Company(name="Acme (test)", ats="greenhouse", board_token=f"test-{uuid.uuid4().hex[:8]}")
+    db_session.add(company)
+    db_session.flush()
+
+    def _make(
+        title: str,
+        *,
+        skills: list[tuple[str, str, float]] = (),     # (skill, category, weight)
+        requirements: list[tuple[str, str]] = (("required", "Build and ship backend services"),),
+        level: str | None = None,
+        min_years: int | None = None,
+        is_remote: bool = False,
+        location: str | None = "New York, NY",
+        axis: int = 0,
+        status: str = "open",
+        external_id: str | None = None,
+    ) -> Job:
+        job = Job(
+            company_id=company.id,
+            external_id=external_id or uuid.uuid4().hex,
+            title=title, location=location, is_remote=is_remote,
+            url=f"https://boards.greenhouse.io/{company.board_token}/jobs/1",
+            description_text=f"{title}\n\n" + "\n".join(t for _, t in requirements),
+            content_hash=uuid.uuid4().hex,
+            skills=[{"skill": s, "category": c, "weight": w, "count": 1, "sections": ["required"]}
+                    for s, c, w in skills],
+            level=level, min_years=min_years, embedding=unit_vector(axis), status=status,
+        )
+        db_session.add(job)
+        db_session.flush()
+        db_session.add_all(JobRequirement(job_id=job.id, section=sec, text=t,
+                                          embedding=unit_vector(axis + i + 1))
+                           for i, (sec, t) in enumerate(requirements))
+        db_session.commit()
+        return job
+
+    _make.company = company
+    return _make

@@ -1,5 +1,6 @@
 import uuid
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
@@ -8,6 +9,12 @@ from app.schemas.analysis import AnalysisCreate, AnalysisOut, AnalysisSummary
 from app.services import analyses
 from app.services.embeddings import EmbeddingError, EmbeddingProvider, get_embedder
 from app.services.feedback import FeedbackGenerator, get_feedback_generator
+from app.services.job_urls import (
+    PostingNotFound,
+    PostingUnavailable,
+    UnsupportedJobUrl,
+    get_posting_client,
+)
 
 router = APIRouter(prefix="/analyses", tags=["analyses"])
 
@@ -23,18 +30,30 @@ def create_analysis(
     db: Session = Depends(get_db),
     embedder: EmbeddingProvider = Depends(get_embedder),
     feedback: FeedbackGenerator = Depends(get_feedback_generator),
+    posting_client: httpx.Client = Depends(get_posting_client),
 ) -> AnalysisOut:
-    if body.job_id or body.job_url:
-        raise HTTPException(
-            status.HTTP_501_NOT_IMPLEMENTED,
-            "Analyzing by job_id or job_url isn't available yet. Paste the job description.",
-        )
     try:
         analysis = analyses.create_analysis(
-            db, user_id, body.resume_id, body.job_description, body.job_title, embedder, feedback
+            db, user_id, body.resume_id, embedder, feedback,
+            job_description=body.job_description, job_title=body.job_title,
+            job_id=body.job_id, job_url=body.job_url, posting_client=posting_client,
         )
+    except UnsupportedJobUrl as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e))
     except analyses.ResumeNotFound:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Resume not found")
+    except analyses.JobNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    except PostingNotFound:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "That job posting wasn't found. It may have closed. Paste the description instead.",
+        )
+    except PostingUnavailable:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "We couldn't reach the job board right now. Try again, or paste the description.",
+        )
     except analyses.RateLimited as e:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,

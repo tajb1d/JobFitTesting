@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db
 from app.schemas.profile import MeResponse, ProfileOut, ProfileUpdate
 from app.services import profiles
+from app.services.embeddings import EmbeddingProvider, get_embedder
 
 router = APIRouter(tags=["profile"])
 
@@ -27,5 +28,6 @@ def update_profile(
     body: ProfileUpdate,
     user_id: uuid.UUID = Depends(get_current_user),
     db: Session = Depends(get_db),
+    embedder: EmbeddingProvider = Depends(get_embedder),
 ) -> ProfileOut:
-    return ProfileOut.model_validate(profiles.upsert_profile(db, user_id, body))
+    return ProfileOut.model_validate(profiles.upsert_profile(db, user_id, body, embedder))

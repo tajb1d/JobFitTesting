@@ -8,11 +8,15 @@ Defaults to the PDFs in tests/fixtures/. Resume bullets are embedded with Voyage
 per resume); job requirement vectors come from the database, so run ingestion first.
 
 "Unrelated" = the job and the resume are in different categories (technical vs
-non-technical, by whether they name any language/framework/database/cloud/devops skill) and
-share no skills at all."""
+non-technical: names a programming language other than SQL, or a framework), share no skills,
+and the job title shares no word with the resume's suggested roles. Database tools alone don't
+make a resume technical: a pricing analyst listing Oracle and Access is not an engineer, and
+treating it as one put related marketing jobs in its "unrelated" sample (the 0.34 of
+2026-09-21)."""
 
 import argparse
 import random
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -31,11 +35,20 @@ from app.services.matcher import ResumeForScoring, semantic_score  # noqa: E402
 from app.services.resumes import analyze_resume  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
-TECH_CATEGORIES = {"language", "framework", "database", "cloud", "devops"}
+PROGRAMMING_CATEGORIES = {"language", "framework"}
+NOT_PROGRAMMING = {"SQL"}  # analysts and marketers list it too
+# Role words too generic to signal relatedness ("Software Engineer" vs "Sales Engineer").
+_GENERIC_ROLE_WORDS = {"engineer", "analyst", "specialist", "manager", "associate", "senior",
+                       "junior", "lead", "developer", "and", "of", "the"}
 
 
 def is_technical(skills: list[dict]) -> bool:
-    return any(s.get("category") in TECH_CATEGORIES for s in skills)
+    return any(s.get("category") in PROGRAMMING_CATEGORIES and s.get("skill") not in NOT_PROGRAMMING
+               for s in skills)
+
+
+def role_words(roles: list[str]) -> set[str]:
+    return {w for r in roles for w in re.findall(r"[a-z]+", r.lower())} - _GENERIC_ROLE_WORDS
 
 
 def raw_score(reqs: list[tuple], resume: ResumeForScoring) -> float:
@@ -67,7 +80,6 @@ def main() -> int:
             requirements.setdefault(job_id, []).append((section, text, vector))
 
     all_raw: list[float] = []
-    all_related: list[float] = []
     for pdf in pdfs:
         analysis = analyze_resume(pdf.read_bytes())
         resume_skills = [{"skill": s.canonical, "category": s.category} for s in analysis.skills]
@@ -82,35 +94,24 @@ def main() -> int:
             structure_score=analysis.structure.score,
         )
 
+        roles = role_words(analysis.suggested_roles)
         pool = [j for j in jobs
                 if j.id in requirements
                 and is_technical(j.skills or []) != technical
-                and not names & {s["skill"] for s in (j.skills or [])}]
+                and not names & {s["skill"] for s in (j.skills or [])}
+                and not roles & set(re.findall(r"[a-z]+", j.title.lower()))]
         raws = [raw_score(requirements[j.id], resume)
                 for j in random.Random(args.seed).sample(pool, min(args.jobs, len(pool)))]
         all_raw += raws
-        # Sanity check, not part of the baseline: related jobs (same category, 2+ shared
-        # skills) should score clearly above it.
-        related = [j for j in jobs
-                   if j.id in requirements and is_technical(j.skills or []) == technical
-                   and len(names & {s["skill"] for s in (j.skills or [])}) >= 2]
-        related_raws = [raw_score(requirements[j.id], resume)
-                        for j in random.Random(args.seed).sample(related, min(args.jobs, len(related)))]
-        all_related += related_raws
         kind = "technical" if technical else "non-technical"
         line = (f"{pdf.name}: {kind} resume, {len(bullets)} bullets, {len(pool)} unrelated jobs, "
                 f"sampled {len(raws)}: mean S_sem_raw {statistics.mean(raws):.3f} "
                 f"(min {min(raws):.3f}, max {max(raws):.3f})")
-        if related_raws:
-            line += f"; related jobs {statistics.mean(related_raws):.3f}"
         print(line)
 
     baseline = statistics.mean(all_raw)
     print(f"\nSEM_BASELINE = {baseline:.2f}  (mean of {len(all_raw)} resume/job pairs, "
           f"stdev {statistics.stdev(all_raw):.3f}; currently {settings.sem_baseline})")
-    if all_related:
-        print(f"Related jobs average S_sem_raw {statistics.mean(all_related):.3f} "
-              f"(S_sem {(statistics.mean(all_related) - baseline) / (1 - baseline):.2f} at this baseline)")
     return 0
 
 

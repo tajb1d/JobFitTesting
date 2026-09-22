@@ -32,7 +32,7 @@ class MatchResult:
     skill_score: float | None
     semantic_score: float | None
     structure_score: float
-    tfidf_score: float
+    tfidf_score: float | None       # None when skipped (the feed doesn't need it)
     semantic_raw: float | None
     matched_skills: list[dict]
     missing_skills: list[dict]
@@ -70,14 +70,31 @@ def semantic_score(
     (S_sem, S_sem_raw, weakly covered requirements)."""
     if not job.requirements or len(requirement_vectors) == 0:
         return None, None, []
+    best = best_matches(requirement_vectors, resume)
+    if best is None:
+        return None, None, []
+    return semantic_from_best(job, best, baseline, weak_threshold)
+
+
+def best_matches(requirement_vectors: np.ndarray, resume: ResumeForScoring) -> np.ndarray | None:
+    """best(r_i): each requirement's highest cosine against the resume bullets (or the whole
+    resume vector when there are no bullets). None when the resume has neither."""
     targets = resume.bullet_vectors
     if len(targets) == 0:
         if resume.resume_vector is None:
-            return None, None, []
+            return None
         targets = np.atleast_2d(resume.resume_vector)
+    return (_unit(requirement_vectors) @ _unit(targets).T).max(axis=1)
 
-    sims = _unit(requirement_vectors) @ _unit(targets).T
-    best = sims.max(axis=1)
+
+def semantic_from_best(
+    job: ParsedJob, best: np.ndarray, baseline: float, weak_threshold: float
+) -> tuple[float | None, float | None, list[dict]]:
+    """S_sem from per-requirement best matches, however they were computed (numpy here, or
+    pgvector in the feed, which saves shipping every requirement vector to the app)."""
+    if not job.requirements or len(best) == 0:
+        return None, None, []
+    best = np.asarray(best, dtype=float)
     raw = float(best.mean())
     scaled = min(max((raw - baseline) / (1 - baseline), 0.0), 1.0)
 
@@ -126,15 +143,19 @@ def score(
     requirement_vectors: np.ndarray,
     resume: ResumeForScoring,
     settings: Settings,
+    *,
+    with_tfidf: bool = True,
+    best: np.ndarray | None = None,
 ) -> MatchResult:
+    """Pass `best` (per-requirement best matches, computed elsewhere) instead of vectors to
+    skip the similarity step; requirement_vectors is then ignored."""
     s_skill, matched, missing = skill_score(job, resume.skills)
-    s_sem, raw, weak = semantic_score(
-        job,
-        requirement_vectors,
-        resume,
-        settings.sem_baseline,
-        settings.sem_baseline + settings.weak_requirement_margin,
-    )
+    baseline = settings.sem_baseline
+    weak_threshold = baseline + settings.weak_requirement_margin
+    if best is not None:
+        s_sem, raw, weak = semantic_from_best(job, best, baseline, weak_threshold)
+    else:
+        s_sem, raw, weak = semantic_score(job, requirement_vectors, resume, baseline, weak_threshold)
     s_struct = resume.structure_score
     final = combine(
         {"skill": s_skill, "semantic": s_sem, "structure": s_struct},
@@ -149,7 +170,7 @@ def score(
         skill_score=None if s_skill is None else round(s_skill, 4),
         semantic_score=None if s_sem is None else round(s_sem, 4),
         structure_score=round(s_struct, 4),
-        tfidf_score=round(tfidf_score(resume.text, job.text), 4),
+        tfidf_score=round(tfidf_score(resume.text, job.text), 4) if with_tfidf else None,
         semantic_raw=None if raw is None else round(raw, 4),
         matched_skills=matched,
         missing_skills=missing,

@@ -117,3 +117,42 @@ def test_falls_back_to_experience_mentions_without_required_section():
 
 def test_no_years_mentioned():
     assert extract_min_years([("required", "Strong SQL skills")]) is None
+
+
+# ---------------------------------------------------------------- feed adjustment (plan §8)
+
+from app.services.eligibility import eligibility_adjustment  # noqa: E402
+
+
+def _adjust(job_level, min_years, user_level, show_stretch=False):
+    return eligibility_adjustment(job_level, min_years, user_level, show_stretch=show_stretch,
+                                  penalty=0.85, hide_levels_above=2, hide_years_margin=3)
+
+
+@pytest.mark.parametrize(
+    "job_level,min_years,user_level,levels_above,stretch,hidden,multiplier",
+    [
+        ("entry", None, "entry", 0, False, False, 1.0),
+        ("intern", None, "entry", -1, False, False, 1.0),     # below: no bonus, no penalty
+        ("mid", None, "entry", 1, True, False, 0.85),
+        ("senior", None, "entry", 2, True, True, 0.85**2),
+        ("staff", None, "mid", 2, True, True, 0.85**2),
+        ("staff", None, "senior", 1, True, False, 0.85),
+        (None, None, "entry", None, False, False, 1.0),       # unknown job level
+        ("staff", 10, None, None, False, False, 1.0),         # unknown user level: no rules
+        (None, 5, "entry", None, True, True, 1.0),            # entry max 2 + 3 <= 5
+        (None, 4, "entry", None, False, False, 1.0),
+        (None, 3, "intern", None, True, True, 1.0),           # intern max 0 + 3
+        (None, 20, "staff", None, False, False, 1.0),         # staff has no ceiling
+    ],
+)
+def test_eligibility_adjustment(job_level, min_years, user_level, levels_above, stretch, hidden, multiplier):
+    e = _adjust(job_level, min_years, user_level)
+    assert (e.levels_above, e.stretch, e.hidden) == (levels_above, stretch, hidden)
+    assert e.multiplier == pytest.approx(multiplier)
+
+
+def test_show_stretch_disables_hiding_but_keeps_the_penalty():
+    e = _adjust("senior", 8, "entry", show_stretch=True)
+    assert (e.hidden, e.stretch) == (False, True)
+    assert e.multiplier == pytest.approx(0.85**2)
