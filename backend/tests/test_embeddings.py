@@ -121,3 +121,85 @@ def test_wrong_dimension_rejected():
 def test_missing_api_key():
     with pytest.raises(EmbeddingError, match="VOYAGE_API_KEY"):
         VoyageProvider("").embed(["a"], "query")
+
+
+# ---------------------------------------------------------------- ingestion pacing
+
+
+class FakeClock:
+    """time.monotonic/time.sleep stand-in: sleeping advances the clock instantly."""
+
+    def __init__(self):
+        self.now = 1000.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+@pytest.fixture
+def clock(monkeypatch) -> FakeClock:
+    clock = FakeClock()
+    monkeypatch.setattr(embeddings.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(embeddings.time, "sleep", clock.sleep)
+    return clock
+
+
+def _ok_with_usage(tokens_per_text: int):
+    def handler(request):
+        response = _ok(request)
+        body = json.loads(response.content)
+        body["usage"] = {"total_tokens": tokens_per_text * len(body["data"])}
+        return httpx.Response(200, json=body)
+    return handler
+
+
+def test_requests_per_minute_is_respected(clock):
+    sent_at = []
+
+    def handler(request):
+        sent_at.append(clock.now)
+        return _ok(request)
+
+    provider = _provider(handler, batch_size=1, requests_per_minute=3)
+    provider.embed(["a", "b", "c", "d", "e"], "document")
+    # 3 go out immediately; the 4th waits until the first leaves the 60 s window.
+    assert sent_at[:3] == [1000.0] * 3
+    assert sent_at[3] >= 1060.0 and sent_at[4] >= 1060.0
+    assert provider.request_count == 5
+
+
+def test_tokens_per_minute_splits_batches_and_paces_by_actual_usage(clock):
+    sizes, sent_at = [], []
+    ok = _ok_with_usage(tokens_per_text=400)
+
+    def handler(request):
+        sizes.append(len(json.loads(request.content)["input"]))
+        sent_at.append(clock.now)
+        return ok(request)
+
+    text = "x" * 1200  # estimated at 401 tokens
+    provider = _provider(handler, tokens_per_minute=1000)
+    provider.embed([text] * 4, "document")
+    assert sizes == [2, 2]                 # 900-token request budget (90% of 1000)
+    assert sent_at[1] - sent_at[0] >= 60   # 800 used + 800 more > 1000 per minute
+    assert provider.token_count == 1600
+
+
+def test_rate_limit_backoff_applies_to_429(clock):
+    calls = []
+
+    def handler(request):
+        calls.append(clock.now)
+        return httpx.Response(429, text="slow down") if len(calls) == 1 else _ok(request)
+
+    _provider(handler, rate_limit_backoff=30).embed(["a"], "query")
+    assert clock.sleeps == [30]
+
+
+def test_estimate_tokens_is_conservative():
+    assert embeddings.estimate_tokens("x" * 400) >= 100  # English averages ~4 chars/token

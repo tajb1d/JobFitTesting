@@ -21,15 +21,19 @@ JD_SECTION_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("required", ("requirements", "required", "qualifications", "what you'll need",
                   "what you need", "what we're looking for", "what we are looking for",
                   "you have", "you'll have", "who you are", "must have", "must-haves",
-                  "skills and experience", "your background", "about you", "experience")),
+                  "skills and experience", "your background", "about you", "experience",
+                  "should have", "you bring", "you'll bring", "ideal candidate",
+                  "vision of you")),
     ("responsibilities", ("responsibilities", "what you'll do", "what you will do", "the role",
                           "your role", "day to day", "day-to-day", "duties", "in this role",
                           "what you'll be doing", "job description", "key tasks",
-                          "the opportunity")),
+                          "the opportunity", "daily")),
     ("benefits", ("benefits", "perks", "compensation", "salary", "pay", "what we offer",
                   "why join", "why you'll love")),
+    # Bare "about"/"why" come last, so "About you" and "About the role" match earlier rules
+    # and only company blurbs ("About Outreach", "Why Discord?") land here.
     ("about", ("about us", "about the company", "who we are", "our mission", "about the team",
-               "equal opportunity", "eeo", "our company", "company overview")),
+               "equal opportunity", "eeo", "our company", "company overview", "about", "why")),
 ]
 REQUIREMENT_SECTIONS = ("required", "responsibilities", "nice")  # priority order when capping
 _IGNORED_FOR_REQUIREMENTS = {"about", "benefits"}
@@ -159,11 +163,65 @@ def classify_jd_heading(line: str) -> str | None:
     return None
 
 
+# Legal and pay boilerplate usually trails a posting with no heading of its own, so without
+# this it would be read as part of the last section (often the requirements).
+_BOILERPLATE_RULES: list[tuple[str, re.Pattern]] = [
+    ("benefits", re.compile(
+        r"\b(base (salary|pay)|salary range|pay range|compensation range|annual salary|"
+        r"pay transparency|on-target earnings|hourly rate|salary (for|of) this|"
+        r"medical, dental|401\(k\) (plan|match)|paid parental leave)\b", re.I)),
+    ("about", re.compile(
+        r"(equal (employment )?opportunit|without regard to|sexual orientation|"
+        r"veteran status|protected (veteran|characteristic)|reasonable accommodation|"
+        r"e-verify|applicants with (arrest|criminal)|fair chance|privacy (notice|policy)|"
+        r"^#LI-)", re.I)),
+]
+
+
+def _boilerplate_key(line: str) -> str | None:
+    for key, pattern in _BOILERPLATE_RULES:
+        if pattern.search(line.strip()):
+            return key
+    return None
+
+
+def _is_lead_in(line: str, next_line: str) -> bool:
+    """An unrecognized heading such as "In this role, you can expect to" introducing real
+    bullets: short, no sentence punctuation, and followed by a non-boilerplate bullet."""
+    stripped = line.strip()
+    return (
+        0 < len(stripped.split()) <= 10
+        and not stripped.endswith((".", "!", "?"))
+        and not glyph_length(stripped)
+        and _boilerplate_key(stripped) is None
+        and glyph_length(next_line) > 0
+        and _boilerplate_key(next_line) is None
+    )
+
+
 def split_jd_sections(text: str) -> list[JobSection]:
     sections = [JobSection("intro", None, "")]
     body: list[list[str]] = [[]]
-    for line in text.splitlines():
+    resume_key = "intro"  # section interrupted by an unheaded boilerplate block
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
         key = classify_jd_heading(line)
+        current = sections[-1]
+        if not key and current.key not in ("about", "benefits"):
+            # Boilerplate opens an unheaded about/benefits section that runs until the next
+            # heading.
+            boilerplate = _boilerplate_key(line)
+            if boilerplate:
+                resume_key = current.key
+                sections.append(JobSection(boilerplate, None, ""))
+                body.append([line])
+                continue
+        if not key and current.heading is None and current.key in ("about", "benefits"):
+            # ...or until a lead-in to real bullets (a salary line placed above the
+            # responsibilities), which resumes the interrupted section.
+            next_line = next((n.strip() for n in lines[i + 1:] if n.strip()), "")
+            if _is_lead_in(line, next_line):
+                key = resume_key
         if key:
             sections.append(JobSection(key, line.strip().rstrip(":").strip("#* "), ""))
             body.append([])
@@ -234,6 +292,9 @@ def extract_job_skills(sections: list[JobSection]) -> list[JobSkill]:
     matcher = get_skill_matcher()
     skills: dict[str, JobSkill] = {}
     for s in sections:
+        # Company blurbs and benefits name customers and perks, not skills the job needs.
+        if s.key in _IGNORED_FOR_REQUIREMENTS:
+            continue
         # Requirement lists are skill lists, so ambiguous words ("Go", "React") count there.
         context = "skills" if s.key in ("required", "nice") else "experience"
         for entry, _, _ in matcher.find(s.text, context):

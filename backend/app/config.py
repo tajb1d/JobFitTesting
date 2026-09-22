@@ -58,6 +58,24 @@ class Settings(BaseSettings):
     # Per-user limit on POST /analyses (each one calls the LLM).
     analyses_per_hour: int = 20
 
+    # Job ingestion (plan §7).
+    # Corpus cap on open jobs (~1,600 embedding tokens each), sized for Supabase's free 500 MB.
+    ingestion_max_open_jobs: int = 3000
+    # Per-company share of the corpus, so one big board (Stripe lists ~670) can't crowd out
+    # the rest. Applied before the global cap; both keep the most recently posted.
+    ingestion_max_jobs_per_company: int = 150
+    # Closed jobs are deleted after this many days, unless a user has an application on them.
+    ingestion_closed_retention_days: int = 14
+    # A company goes inactive after this many consecutive failed fetches.
+    ingestion_max_failures: int = 3
+    # Pause between ATS requests (be polite: sequential, small delay).
+    ingestion_request_delay: float = 1.0
+    # Client-side Voyage pacing for ingestion, well under the paid-tier limits. An account
+    # without a payment method is capped at 3 req/min and 10K tokens/min: set these to 3 and
+    # 10000 (and lower the corpus cap) there.
+    voyage_requests_per_minute: int = 300
+    voyage_tokens_per_minute: int = 1_000_000
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]
