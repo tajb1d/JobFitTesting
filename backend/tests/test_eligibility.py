@@ -31,7 +31,9 @@ from app.services.eligibility import extract_min_years, level_from_title, years_
         ("Principal Data Scientist", "staff"),
         ("Engineering Manager, Payments", "staff"),
         ("Tech Lead, Mobile", "staff"),
-        ("Solutions Architect", "staff"),
+        ("Manager, Recruiting - Sales", "staff"),
+        ("Sales Manager", "staff"),
+        ("Enterprise Architect Lead", "staff"),  # "lead" still counts
         ("Director of Engineering", "staff"),
         ("Associate Director, Analytics", "staff"),  # director outranks associate
         ("VP of Product", "staff"),
@@ -42,6 +44,16 @@ from app.services.eligibility import extract_min_years, level_from_title, years_
         ("Registered Nurse", None),
         ("Data Analyst", None),
         ("IT Support Specialist", None),  # "IT" is not the numeral I
+        # IC job families named "manager"/"architect" carry no level by themselves
+        ("Product Manager, Treasury for Platforms", None),
+        ("Solutions Architect, (Italian fluency)", None),
+        ("Events Manager", None),
+        ("Partner Development Manager", None),
+        ("Senior Product Manager", "senior"),
+        ("Staff Product Manager, Payments", "staff"),
+        ("Senior Product Manager, Growth", "senior"),
+        ("NextStay Fellow, Tech Ops & Programs", None),  # a fellowship, not a Fellow
+        ("Technical Fellow, AI", "staff"),
     ],
 )
 def test_level_from_title(title, level):

@@ -46,11 +46,11 @@ class Settings(BaseSettings):
     weight_semantic: float = 0.35
     weight_structure: float = 0.15
 
-    # S_sem calibration (plan §6): mean raw S_sem of resumes against unrelated jobs.
-    # Provisional 0.27, measured 2026-09-21 with voyage-4-lite on 4 unrelated fixture pairs
-    # (range 0.25-0.29; the plan's 0.5 default clamped every job to S_sem = 0). Recompute with
-    # scripts/calibrate.py once the job corpus exists.
-    sem_baseline: float = 0.27
+    # S_sem calibration (plan §6): mean raw S_sem of resumes against unrelated jobs, from
+    # scripts/calibrate.py on 2026-09-21 (3 fixture resumes x 50 unrelated corpus jobs,
+    # voyage-4-lite; stdev 0.037). Related corpus jobs averaged 0.348, barely above it, so
+    # S_sem currently separates corpus jobs weakly; revisit the formula before relying on it.
+    sem_baseline: float = 0.34
     # A requirement is "weakly covered" when its best resume-bullet match is within this
     # margin of the unrelated-pair baseline.
     weak_requirement_margin: float = 0.05

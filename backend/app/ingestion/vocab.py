@@ -4,11 +4,11 @@ Reports candidates only; a person decides what to add. Ingestion-only: noun chun
 tagger and parser, which the web app's pipeline (nlp_analyzer.get_nlp) excludes to fit
 Render's 512 MB. app.main never imports this module.
 
-Runnable over the stored corpus: python -m app.ingestion.vocab [--top N] [--min-jobs K]"""
+Runnable over the stored corpus: python -m app.ingestion.vocab [--top N] [--min-companies K]"""
 
 import argparse
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from functools import lru_cache
 
@@ -35,6 +35,14 @@ GENERIC_WORDS = {
     "bachelor", "bachelors", "master", "masters", "phd", "bs", "ms", "ba", "etc", "e.g.",
     "i.e.", "least", "ideal", "demonstrated", "proven", "excellent", "great", "good", "solid",
     "deep", "hands", "similar", "multiple", "new", "high", "best", "other", "more", "most",
+    "science", "computer", "engineering", "business", "technical", "quantitative", "day",
+    "detail", "details", "attention", "willingness", "comfort", "ambiguity", "success",
+    "impact", "fast", "paced", "fast-paced", "environment", "communication", "written",
+    "verbal", "english", "fluency", "degree", "degrees", "discipline", "disciplines",
+    "industry", "customers", "customer", "product", "products", "tools", "technology",
+    "on", "prior", "direct", "professional", "practical", "minimum", "preferred",
+    "qualification", "qualifications", "above", "cross", "functional", "building", "part",
+    "core", "information", "process", "processes", "concepts", "needs", "value", "quality",
 }
 
 
@@ -45,12 +53,21 @@ def get_chunk_nlp() -> Language:
 
 
 def _clean(chunk) -> str | None:
-    tokens = list(chunk)
+    tokens = [t for t in chunk if t.tag_ != "POS"]  # possessive "'s": "bachelor's degree"
     while tokens and tokens[0].pos_ in _DROP_LEADING:
         tokens = tokens[1:]
     if not tokens or len(tokens) > MAX_TOKENS:
         return None
-    term = re.sub(r"\s+", " ", " ".join(t.text for t in tokens)).lower()
+    # A lone lowercase common noun ("customers", "tools", "ambiguity") is almost never a
+    # skill. Single words stay only when they look like names: proper nouns, acronyms,
+    # capitalized or containing digits ("ITAR", "Salesforce", "S3").
+    if len(tokens) == 1:
+        word = tokens[0]
+        if word.pos_ != "PROPN" and word.text.islower() and not any(ch.isdigit() for ch in word.text):
+            return None
+    # Span text keeps hyphenated words whole ("hands-on", not "hands - on").
+    term = chunk.doc[tokens[0].i : tokens[-1].i + 1].text
+    term = re.sub(r"\s*['’]s\b", "", re.sub(r"\s+", " ", term)).lower()
     term = term.strip(" .,;:()[]\"'•-–—/")
     if len(term) < 3 or not re.search(r"[a-z]", term):
         return None
@@ -76,12 +93,34 @@ def requirement_texts(sections: list[JobSection]) -> list[str]:
     return [s.text for s in sections if s.key in VOCAB_SECTIONS]
 
 
-def format_report(counter: Counter, top: int = 25, min_jobs: int = 3) -> str:
-    frequent = [(term, n) for term, n in counter.most_common() if n >= min_jobs][:top]
+class TermStats:
+    """How many jobs, and how many distinct companies, use each unmatched term. Ranked by
+    companies: a real skill recurs across employers, while one company's template text
+    ("ITAR" export boilerplate, "Toasters") repeats only within its own postings."""
+
+    def __init__(self) -> None:
+        self.jobs: Counter = Counter()
+        self.companies: defaultdict[str, set] = defaultdict(set)
+
+    def add(self, company: object, terms: Iterable[str]) -> None:
+        for term in terms:
+            self.jobs[term] += 1
+            self.companies[term].add(company)
+
+    def __bool__(self) -> bool:
+        return bool(self.jobs)
+
+    def ranked(self, min_companies: int = 2) -> list[tuple[str, int, int]]:
+        rows = [(t, len(c), self.jobs[t]) for t, c in self.companies.items() if len(c) >= min_companies]
+        return sorted(rows, key=lambda r: (-r[1], -r[2], r[0]))
+
+
+def format_report(stats: TermStats, top: int = 25, min_companies: int = 2) -> str:
+    frequent = stats.ranked(min_companies)[:top]
     if not frequent:
-        return f"  (no unmatched term appears in {min_jobs}+ jobs)"
-    width = max(len(term) for term, _ in frequent)
-    return "\n".join(f"  {term:<{width}}  {n} jobs" for term, n in frequent)
+        return f"  (no unmatched term appears at {min_companies}+ companies)"
+    width = max(len(term) for term, _, _ in frequent)
+    return "\n".join(f"  {term:<{width}}  {c} companies, {n} jobs" for term, c, n in frequent)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -92,16 +131,17 @@ def main(argv: list[str] | None = None) -> None:
 
     parser = argparse.ArgumentParser(description="Report frequent noun chunks not in skills.json.")
     parser.add_argument("--top", type=int, default=50)
-    parser.add_argument("--min-jobs", type=int, default=10)
+    parser.add_argument("--min-companies", type=int, default=3)
     args = parser.parse_args(argv)
 
     with get_sessionmaker()() as db:
-        rows = db.execute(select(Job.title, Job.description_text).where(Job.status == "open")).all()
-    counter: Counter = Counter()
-    for title, text in rows:
-        counter.update(unmatched_terms(requirement_texts(parse_job(text, title).sections)))
+        rows = db.execute(select(Job.company_id, Job.title, Job.description_text)
+                          .where(Job.status == "open")).all()
+    stats = TermStats()
+    for company_id, title, text in rows:
+        stats.add(company_id, unmatched_terms(requirement_texts(parse_job(text, title).sections)))
     print(f"Frequent unmatched terms across {len(rows)} open jobs (candidates for skills.json):")
-    print(format_report(counter, args.top, args.min_jobs))
+    print(format_report(stats, args.top, args.min_companies))
 
 
 if __name__ == "__main__":

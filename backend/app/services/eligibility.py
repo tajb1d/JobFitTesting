@@ -12,7 +12,8 @@ LEVELS: tuple[Level, ...] = ("intern", "entry", "mid", "senior", "staff")
 # "Associate Software Engineer" is entry, "Engineering Manager" is staff.
 _INTERN = re.compile(r"\b(intern|internship|co-?op|apprentice(ship)?)\b", re.I)
 _STAFF_STRONG = re.compile(
-    r"\b(principal|staff|director|vp|svp|evp|vice president|head of|chief|distinguished|fellow)\b",
+    r"\b(principal|staff|director|vp|svp|evp|vice president|head of|chief|distinguished|"
+    r"technical fellow)\b",
     re.I,
 )
 _SENIOR = re.compile(r"\b(senior|sr)\b\.?", re.I)
@@ -21,6 +22,18 @@ _JUNIOR = re.compile(
     re.I,
 )
 _STAFF_WEAK = re.compile(r"\b(lead|manager|architect)\b", re.I)
+# "Manager"/"Architect" in these titles names an individual-contributor job family, not a
+# people manager or senior architect ("Product Manager", "Solutions Architect"), so it gives
+# no level cue. People-management titles ("Engineering Manager", "Manager, Recruiting",
+# "Sales Manager") still count.
+_IC_ROLE = re.compile(
+    r"\b(product|program|project|account|marketing|events?|partner|partnerships?|community|"
+    r"customer success|success|content|brand|channel|campaign|category|solutions?|engagement|"
+    r"territory|development|relations|growth|lifecycle|communications|payroll|office|"
+    r"facilities|release|delivery|implementation|enterprise|cloud|data|security)\s+"
+    r"(manager|architect)\b",
+    re.I,
+)
 # Roman numerals are case-sensitive so "I" doesn't match the pronoun or "i".
 _NUMERAL = re.compile(r"(?<![\w-])(I{1,3}|IV|V)(?![\w-])")
 _MID = re.compile(r"\b(mid[- ]?level|intermediate)\b", re.I)
@@ -37,7 +50,7 @@ def level_from_title(title: str) -> Level | None:
     senior = bool(_SENIOR.search(t))
     if _JUNIOR.search(t) and not senior:
         return "entry"
-    if _STAFF_WEAK.search(t):
+    if _STAFF_WEAK.search(_IC_ROLE.sub(" ", t)):
         return "staff"
     if senior:
         return "senior"

@@ -3,7 +3,6 @@
 callable, so tests run it with recorded payloads and a fake embedder."""
 
 import logging
-from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -12,9 +11,9 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.ingestion.sources import FetchError, NormalizedJob
+from app.ingestion.vocab import TermStats, format_report, requirement_texts, unmatched_terms
 from app.models import Application, Company, Job, JobRequirement
 from app.services.embeddings import EmbeddingError, EmbeddingProvider
-from app.ingestion.vocab import format_report, requirement_texts, unmatched_terms
 from app.services.jd_parser import ParsedJob, parse_job
 
 logger = logging.getLogger(__name__)
@@ -47,8 +46,8 @@ class Summary:
     embedding_calls: int = 0
     embedding_tokens: int = 0
     failures: list[str] = field(default_factory=list)
-    # Document frequency of noun chunks not in skills.json (plan §5), from parsed jobs.
-    unmatched_terms: Counter = field(default_factory=Counter)
+    # Noun chunks not in skills.json (plan §5) from this run's parsed jobs, per company.
+    unmatched_terms: TermStats = field(default_factory=TermStats)
     error: str | None = None
 
     def render(self) -> str:
@@ -170,9 +169,9 @@ def _apply_parse(row: Job, parsed: ParsedJob) -> None:
     row.min_years = parsed.min_years
 
 
-def _count_unmatched(parsed: list[ParsedJob], summary: Summary) -> None:
+def _count_unmatched(company_id: int, parsed: list[ParsedJob], summary: Summary) -> None:
     for p in parsed:
-        summary.unmatched_terms.update(unmatched_terms(requirement_texts(p.sections)))
+        summary.unmatched_terms.add(company_id, unmatched_terms(requirement_texts(p.sections)))
 
 
 def job_embedding_text(title: str, description_text: str) -> str:
@@ -187,7 +186,7 @@ def _process_chunk(
     summary: Summary,
 ) -> None:
     parsed = [parse_job(job.description_html, job.title) for job, _ in chunk]
-    _count_unmatched(parsed, summary)
+    _count_unmatched(company_id, parsed, summary)
     # Embed before touching the DB: a Voyage failure leaves this chunk's rows as they were.
     job_vectors = embedder.embed(
         [job_embedding_text(job.title, p.text) for (job, _), p in zip(chunk, parsed)], "document"
@@ -223,14 +222,14 @@ def _process_chunk(
 
 
 def _reparse_chunk(
-    db: Session, chunk: list[tuple[NormalizedJob, Job]], embedder: EmbeddingProvider,
-    summary: Summary,
+    db: Session, company_id: int, chunk: list[tuple[NormalizedJob, Job]],
+    embedder: EmbeddingProvider, summary: Summary,
 ) -> None:
     """Re-run the parser on unchanged jobs (after parser or skills.json changes). Skills,
     level and min_years are refreshed; requirements are re-embedded only when their list
     changed. The job embedding depends only on title + text, so it's kept."""
     parsed = [parse_job(job.description_html, job.title) for job, _ in chunk]
-    _count_unmatched(parsed, summary)
+    _count_unmatched(company_id, parsed, summary)
     stored: dict = {}
     for r in db.scalars(select(JobRequirement)
                         .where(JobRequirement.job_id.in_([row.id for _, row in chunk]))
@@ -310,7 +309,7 @@ def run_ingestion(
                 logger.info("processed %d new/updated jobs", summary.jobs_new + summary.jobs_updated)
             if reparse:
                 for i in range(0, len(unchanged), CHUNK_SIZE):
-                    _reparse_chunk(db, unchanged[i : i + CHUNK_SIZE], embedder, summary)
+                    _reparse_chunk(db, company_id, unchanged[i : i + CHUNK_SIZE], embedder, summary)
                 logger.info("reparsed %d unchanged jobs", summary.jobs_reparsed)
     except EmbeddingError as e:
         db.rollback()

@@ -1,8 +1,6 @@
 """Unmatched noun-chunk report (plan §5). Uses the installed spaCy model; no network."""
 
-from collections import Counter
-
-from app.ingestion.vocab import format_report, requirement_texts, unmatched_terms
+from app.ingestion.vocab import TermStats, format_report, requirement_texts, unmatched_terms
 from app.services.jd_parser import parse_job
 
 
@@ -32,9 +30,20 @@ def test_only_requirement_sections_are_scanned():
     assert requirement_texts(job.sections) == ["• Experience with feature flags"]
 
 
-def test_format_report_respects_min_jobs_and_top():
-    counter = Counter({"feature flags": 12, "loyalty programs": 4, "rare thing": 1})
-    report = format_report(counter, top=1, min_jobs=3)
-    assert "feature flags" in report and "12 jobs" in report
-    assert "loyalty programs" not in report  # cut by top=1
-    assert "no unmatched term" in format_report(Counter({"rare": 1}), min_jobs=3)
+def test_report_ranks_by_companies_not_jobs():
+    stats = TermStats()
+    for job in range(40):  # one company's template repeated across its postings
+        stats.add("toast", {"toasters"})
+    for company in ("a", "b", "c"):
+        stats.add(company, {"feature flags"})
+    stats.add("a", {"rare thing"})
+    assert [t for t, _, _ in stats.ranked(min_companies=1)][:2] == ["feature flags", "toasters"]
+    report = format_report(stats, top=5, min_companies=2)
+    assert "feature flags  3 companies, 3 jobs" in report
+    assert "toasters" not in report and "rare thing" not in report
+    assert "no unmatched term" in format_report(TermStats(), min_companies=2)
+
+
+def test_hyphenated_words_stay_whole():
+    terms = unmatched_terms(["• Experience with event-driven pipelines"])
+    assert "event-driven pipelines" in terms
