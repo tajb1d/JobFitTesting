@@ -1,6 +1,7 @@
 import time
 import uuid
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
 import jwt
@@ -12,10 +13,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
-from app.config import JWT_AUDIENCE, get_settings
+from app.config import EMBEDDING_DIM, JWT_AUDIENCE, get_settings
 from app.db import get_db, get_engine
 from app.main import app
 from app.services.auth import get_jwks_client
+from app.services.embeddings import get_embedder
 
 TEST_KID = "test-kid"
 _RANDOM = object()
@@ -121,13 +123,54 @@ def test_user_id(db_session: Session) -> uuid.UUID:
     if user_id is None:
         pytest.skip(f"Test user {email} not found in auth.users")
     db_session.execute(text("DELETE FROM profiles WHERE user_id = :u"), {"u": user_id})
+    db_session.execute(text("DELETE FROM resumes WHERE user_id = :u"), {"u": user_id})
     return user_id
 
 
+class FakeEmbedder:
+    """Stands in for Voyage. Records calls; returns a distinct unit-ish vector per text."""
+
+    def __init__(self, fail: bool = False):
+        self.calls: list[tuple[str, list[str]]] = []
+        self.fail = fail
+
+    def embed(self, texts: list[str], input_type: str) -> list[list[float]]:
+        from app.services.embeddings import EmbeddingError
+
+        self.calls.append((input_type, list(texts)))
+        if self.fail:
+            raise EmbeddingError("simulated outage")
+        return [[(i + 1) / 1000] * EMBEDDING_DIM for i in range(len(texts))]
+
+
 @pytest.fixture
-def db_client(db_session: Session, test_user_id: uuid.UUID) -> Iterator[TestClient]:
-    """App client authenticated as the test user, backed by the rolled-back session."""
+def fake_embedder() -> FakeEmbedder:
+    return FakeEmbedder()
+
+
+@pytest.fixture
+def db_client(
+    db_session: Session, test_user_id: uuid.UUID, fake_embedder: FakeEmbedder
+) -> Iterator[TestClient]:
+    """App client authenticated as the test user, backed by the rolled-back session, with
+    Voyage replaced by a fake."""
     app.dependency_overrides[get_db] = lambda: db_session
     app.dependency_overrides[get_current_user] = lambda: test_user_id
+    app.dependency_overrides[get_embedder] = lambda: fake_embedder
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------- resume PDFs
+
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(scope="session")
+def fixture_pdfs() -> list[Path]:
+    """Real resume PDFs in tests/fixtures/ (gitignored: they may contain personal data)."""
+    pdfs = sorted(FIXTURES_DIR.glob("*.pdf"))
+    if not pdfs:
+        pytest.skip("No resume PDFs in tests/fixtures/")
+    return pdfs

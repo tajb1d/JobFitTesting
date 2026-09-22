@@ -19,9 +19,11 @@ pyjwt[crypto]>=2.8,<3
 # HTTP client (Supabase, Voyage)
 httpx>=0.27,<1
 
-# Resume pipeline (used from Session 2 on)
+# Resume pipeline
 pymupdf>=1.24,<2
-spacy>=3.7,<4
+spacy>=3.8,<3.9
+# spaCy models aren't on PyPI; pin the exact wheel so Docker and CI get the same one.
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 scikit-learn>=1.5,<2
 
 # LLM feedback
