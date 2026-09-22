@@ -1,0 +1,30 @@
+# Render Blueprint: one free Docker web service for the API.
+# Render → New → Blueprint → pick this repo. Values marked `sync: false` are typed into the
+# dashboard (or Render prompts for them on first deploy); nothing secret lives in this file.
+services:
+  - type: web
+    name: jobfit-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      # Supabase → Connect → Session pooler (IPv4), prefix swapped to postgresql+psycopg://
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      # Server-only key: it bypasses RLS and deletes auth users.
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: VOYAGE_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Comma-separated, scheme included, no trailing slash. Add the Vercel URL after the
+      # frontend is deployed, then redeploy.
+      - key: CORS_ORIGINS
+        sync: false
