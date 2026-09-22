@@ -1,0 +1,27 @@
+Software Engineer I (New Grad)
+
+About the role
+Our Platform team builds the services that process millions of shipment updates a day. As a new-grad engineer you'll ship production code in your first month, pair with senior engineers, and own a small service end to end.
+
+What you'll do
+- Design, build, and test backend services in Python and C++
+- Write clean, well-tested code and participate in code reviews
+- Debug production issues across our services and databases
+- Improve the performance of core algorithms and data processing jobs
+- Collaborate with product and design to scope features
+
+Requirements
+- Bachelor's degree in Computer Science, Computer Engineering, or a related field (or expected by graduation)
+- 0-2 years of professional software engineering experience; internships count
+- Strong foundation in data structures, algorithms, and object-oriented programming
+- Proficiency in at least one of Python, Java, or C++
+- Familiarity with SQL and relational databases
+- Experience with Git and version control workflows
+
+Nice to have
+- Experience with REST APIs or distributed systems
+- Exposure to AWS, Docker, or Linux
+- Coursework or projects in networking or computer architecture
+
+Benefits
+Competitive salary, 401(k) with 4% match that fully vests after 3 years, health insurance, and a learning budget.

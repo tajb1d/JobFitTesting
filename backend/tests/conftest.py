@@ -18,6 +18,7 @@ from app.db import get_db, get_engine
 from app.main import app
 from app.services.auth import get_jwks_client
 from app.services.embeddings import get_embedder
+from app.services.feedback import FeedbackError, FeedbackItem, get_feedback_generator
 
 TEST_KID = "test-kid"
 _RANDOM = object()
@@ -148,15 +149,42 @@ def fake_embedder() -> FakeEmbedder:
     return FakeEmbedder()
 
 
+class FakeFeedback:
+    """Stands in for Claude. Records the context it was given."""
+
+    def __init__(self, fail: bool = False):
+        self.contexts: list[dict] = []
+        self.fail = fail
+
+    def generate(self, context: dict) -> list[FeedbackItem]:
+        self.contexts.append(context)
+        if self.fail:
+            raise FeedbackError("simulated LLM failure")
+        items = [FeedbackItem(type="missing_skill", severity="high",
+                              message=f"If you've used skill {i}, add it to your resume.")
+                 for i in range(4)]
+        return items + [FeedbackItem(type="strength", severity="low",
+                                     message="Your projects show relevant programming work.")]
+
+
+@pytest.fixture
+def fake_feedback() -> FakeFeedback:
+    return FakeFeedback()
+
+
 @pytest.fixture
 def db_client(
-    db_session: Session, test_user_id: uuid.UUID, fake_embedder: FakeEmbedder
+    db_session: Session,
+    test_user_id: uuid.UUID,
+    fake_embedder: FakeEmbedder,
+    fake_feedback: FakeFeedback,
 ) -> Iterator[TestClient]:
     """App client authenticated as the test user, backed by the rolled-back session, with
-    Voyage replaced by a fake."""
+    Voyage and Claude replaced by fakes."""
     app.dependency_overrides[get_db] = lambda: db_session
     app.dependency_overrides[get_current_user] = lambda: test_user_id
     app.dependency_overrides[get_embedder] = lambda: fake_embedder
+    app.dependency_overrides[get_feedback_generator] = lambda: fake_feedback
     yield TestClient(app)
     app.dependency_overrides.clear()
 

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -8,6 +9,15 @@ from app.api import health
 from app.api.router import api_router
 from app.config import get_settings
 from app.services.nlp_analyzer import get_skill_matcher
+
+# uvicorn configures only its own loggers; without this, INFO/WARNING logs from app.* (e.g.
+# "LLM feedback unavailable, using templates") are silently dropped.
+_app_logger = logging.getLogger("app")
+if not _app_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s - %(message)s"))
+    _app_logger.addHandler(_handler)
+    _app_logger.setLevel(logging.INFO)
 
 
 @asynccontextmanager

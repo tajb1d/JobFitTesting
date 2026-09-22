@@ -41,10 +41,22 @@ class Settings(BaseSettings):
     test_user_email: str = ""
     test_user_password: str = ""
 
-    # Scoring weights (plan §6). Must sum to 1.
+    # Scoring weights (plan §6). Must sum to 1. A null subscore's weight is redistributed.
     weight_skill: float = 0.50
     weight_semantic: float = 0.35
     weight_structure: float = 0.15
+
+    # S_sem calibration (plan §6): mean raw S_sem of resumes against unrelated jobs.
+    # Provisional 0.27, measured 2026-09-21 with voyage-4-lite on 4 unrelated fixture pairs
+    # (range 0.25-0.29; the plan's 0.5 default clamped every job to S_sem = 0). Recompute with
+    # scripts/calibrate.py once the job corpus exists.
+    sem_baseline: float = 0.27
+    # A requirement is "weakly covered" when its best resume-bullet match is within this
+    # margin of the unrelated-pair baseline.
+    weak_requirement_margin: float = 0.05
+
+    # Per-user limit on POST /analyses (each one calls the LLM).
+    analyses_per_hour: int = 20
 
     @property
     def cors_origin_list(self) -> list[str]:
