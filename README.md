@@ -363,3 +363,7 @@ but an analysis is a fraction of a cent and the 20-per-hour cap bounds it.
   API, and the eligibility rules.
 - **[docs/build-guide.md](docs/build-guide.md)** — the session-by-session build order.
 - **[CLAUDE.md](CLAUDE.md)** — conventions and gotchas for working in this repo.
+
+---
+
+Built with 📄 resumes, 🧮 embeddings, 🔍 job boards and ☕. Happy job hunting! 🚀
